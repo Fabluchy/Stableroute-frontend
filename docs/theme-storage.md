@@ -68,3 +68,8 @@ Run the settings tests in isolation:
 ```bash
 npx jest src/app/settings/page.test.tsx --verbose
 ```
+
+## Related
+
+- [`docs/theme-component.md`](./theme-component.md) — `ThemeToggle` component
+  contract, `theme.ts` module API, and usage examples.

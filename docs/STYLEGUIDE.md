@@ -233,6 +233,8 @@ function SortHeader({ label, sortKey, activeSortKey, sortDir, onSort }) {
 - [`README.md`](../README.md) — overview, routes, scripts.
 - [`docs/theme-storage.md`](./theme-storage.md) — light/dark toggle and the
   `localStorage` contract that backs it.
+- [`docs/theme-component.md`](./theme-component.md) — `ThemeToggle` component
+  contract and `theme.ts` module API.
 
 ## IconButton accessible-label contract
 
