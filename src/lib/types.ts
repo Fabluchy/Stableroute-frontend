@@ -26,6 +26,9 @@ export type Quote = {
   amount: string;
   estimated_rate: string;
   route: string[];
+  /** Slippage percentage describing the worst-case rate movement. Optional
+   *  — backends that do not report slippage omit this field. */
+  slippage?: string;
 };
 
 // ============================================================================
