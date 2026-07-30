@@ -551,6 +551,225 @@ describe('QuotePage', () => {
     });
     expect(screen.getByRole('alert')).not.toHaveTextContent(/Request ID/);
   });
+
+  describe('slippage live region', () => {
+    const getSlippageRegion = () =>
+      document.querySelector('[aria-live=polite].sr-only')!;
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('announces slippage value when the backend includes slippage', async () => {
+      jest.useFakeTimers();
+      globalThis.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            source_asset: 'USDC',
+            dest_asset: 'EURC',
+            amount: '1000000',
+            estimated_rate: '1.0',
+            route: ['USDC', 'EURC'],
+            slippage: '0.5%',
+          }),
+      } as unknown as Response);
+
+      render(<QuotePage />);
+      fireEvent.change(
+        screen.getByLabelText(/Source asset/i, { selector: 'input' }),
+        { target: { value: 'USDC' } }
+      );
+      fireEvent.change(
+        screen.getByLabelText(/Destination asset/i, { selector: 'input' }),
+        { target: { value: 'EURC' } }
+      );
+      fireEvent.change(getAmountInput(), {
+        target: { value: '1000000' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Get quote/i }));
+
+      // Wait for the response to be processed
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(/USDC → EURC/);
+      });
+
+      // Advance past the 300ms debounce
+      act(() => {
+        jest.advanceTimersByTime(300);
+      });
+
+      expect(getSlippageRegion()).toHaveTextContent('Slippage: 0.5%');
+    });
+
+    it('announces slippage unavailable when the backend omits slippage', async () => {
+      jest.useFakeTimers();
+      globalThis.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            source_asset: 'USDC',
+            dest_asset: 'EURC',
+            amount: '1000000',
+            estimated_rate: '1.0',
+            route: ['USDC', 'EURC'],
+          }),
+      } as unknown as Response);
+
+      render(<QuotePage />);
+      fireEvent.change(
+        screen.getByLabelText(/Source asset/i, { selector: 'input' }),
+        { target: { value: 'USDC' } }
+      );
+      fireEvent.change(
+        screen.getByLabelText(/Destination asset/i, { selector: 'input' }),
+        { target: { value: 'EURC' } }
+      );
+      fireEvent.change(getAmountInput(), {
+        target: { value: '1000000' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Get quote/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(/USDC → EURC/);
+      });
+
+      act(() => {
+        jest.advanceTimersByTime(300);
+      });
+
+      expect(getSlippageRegion()).toHaveTextContent('Slippage unavailable');
+    });
+
+    it('announces slippage unavailable on request failure', async () => {
+      jest.useFakeTimers();
+      globalThis.fetch = jest.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () =>
+          JSON.stringify({
+            error: 'internal_error',
+            message: 'something went wrong',
+          }),
+      } as unknown as Response);
+
+      render(<QuotePage />);
+      fireEvent.change(
+        screen.getByLabelText(/Source asset/i, { selector: 'input' }),
+        { target: { value: 'USDC' } }
+      );
+      fireEvent.change(
+        screen.getByLabelText(/Destination asset/i, { selector: 'input' }),
+        { target: { value: 'EURC' } }
+      );
+      fireEvent.change(getAmountInput(), {
+        target: { value: '1000000' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Get quote/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          /something went wrong/
+        );
+      });
+
+      act(() => {
+        jest.advanceTimersByTime(300);
+      });
+
+      expect(getSlippageRegion()).toHaveTextContent('Slippage unavailable');
+    });
+
+    it('debounces rapid successive slippage updates', async () => {
+      jest.useFakeTimers();
+
+      let firstResolve: ((v: Response) => void) | undefined;
+      const firstResponse = new Promise<Response>((resolve) => {
+        firstResolve = resolve;
+      });
+
+      let secondResolve: ((v: Response) => void) | undefined;
+      const secondResponse = new Promise<Response>((resolve) => {
+        secondResolve = resolve;
+      });
+
+      globalThis.fetch = jest
+        .fn()
+        .mockReturnValueOnce(firstResponse)
+        .mockReturnValueOnce(secondResponse) as unknown as typeof globalThis.fetch;
+
+      render(<QuotePage />);
+      fireEvent.change(
+        screen.getByLabelText(/Source asset/i, { selector: 'input' }),
+        { target: { value: 'USDC' } }
+      );
+      fireEvent.change(
+        screen.getByLabelText(/Destination asset/i, { selector: 'input' }),
+        { target: { value: 'EURC' } }
+      );
+      fireEvent.change(getAmountInput(), {
+        target: { value: '1000000' },
+      });
+
+      const form = getAmountInput().closest('form')!;
+
+      // Submit first request
+      fireEvent.submit(form);
+
+      // Advance past cooldown and submit second request before first resolves
+      act(() => {
+        jest.advanceTimersByTime(1000);
+      });
+      fireEvent.submit(form);
+
+      // Resolve both requests in rapid succession
+      firstResolve?.({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            source_asset: 'USDC',
+            dest_asset: 'EURC',
+            amount: '1000000',
+            estimated_rate: '1.0',
+            route: ['USDC', 'EURC'],
+            slippage: '0.3%',
+          }),
+      } as unknown as Response);
+
+      secondResolve?.({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            source_asset: 'USDC',
+            dest_asset: 'EURC',
+            amount: '1000000',
+            estimated_rate: '1.0',
+            route: ['USDC', 'EURC'],
+            slippage: '0.7%',
+          }),
+      } as unknown as Response);
+
+      // Wait for the active request (second) to resolve
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(/USDC → EURC/);
+      });
+
+      // At 150ms: second request's debounce timer is running, has cancelled first
+      act(() => {
+        jest.advanceTimersByTime(150);
+      });
+      // Should still be empty — debounce hasn't fired yet
+      expect(getSlippageRegion().textContent).toBe('');
+
+      // Advance past the 300ms debounce
+      act(() => {
+        jest.advanceTimersByTime(200);
+      });
+
+      // Should now show the second (most recent) slippage value
+      expect(getSlippageRegion()).toHaveTextContent('Slippage: 0.7%');
+    });
+  });
 });
 
 describe('QuoteError segment boundary', () => {

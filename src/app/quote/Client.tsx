@@ -91,6 +91,22 @@ export default function QuoteClient() {
   const requestControllerRef = useRef<AbortController | null>(null);
   const lastSubmitAtRef = useRef<number | null>(null);
 
+  // Slippage live-region announcement with debouncing
+  const [slippageAnnouncement, setSlippageAnnouncement] = useState('');
+  const slippageDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  const announceSlippage = (message: string) => {
+    if (slippageDebounceRef.current) {
+      clearTimeout(slippageDebounceRef.current);
+    }
+    // Brief debounce to collapse rapid successive updates into one announcement
+    slippageDebounceRef.current = setTimeout(() => {
+      setSlippageAnnouncement(message);
+    }, 300);
+  };
+
   // Prefill once storage has synced client-side (see useLocalStorage's SSR
   // handling). Re-running only when the stored value actually changes avoids
   // clobbering in-progress edits.
@@ -104,6 +120,15 @@ export default function QuoteClient() {
 
   useEffect(() => {
     setHistory(readHistory());
+  }, []);
+
+  // Cleanup the debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (slippageDebounceRef.current) {
+        clearTimeout(slippageDebounceRef.current);
+      }
+    };
   }, []);
 
   const applyInputs = (inputs: QuoteInputs) => {
@@ -140,6 +165,7 @@ export default function QuoteClient() {
     setFormError(null);
     setRequestId(null);
     setQuote(null);
+    setSlippageAnnouncement('');
 
     const nextErrors: FieldErrors = {};
     const normalizedSource = normalizeAssetCode(sourceAsset);
@@ -195,12 +221,18 @@ export default function QuoteClient() {
       if (requestId !== activeRequestRef.current) return;
       setQuote(body);
       setHistory(pushHistory(inputs));
+      if (body.slippage) {
+        announceSlippage(`Slippage: ${body.slippage}`);
+      } else {
+        announceSlippage('Slippage unavailable');
+      }
     } catch (err) {
       if (requestId !== activeRequestRef.current) return;
       if (controller.signal.aborted) return;
       const apiError = err as ApiError & { requestId?: string };
       setFormError(apiError.message ?? 'quote request failed');
       setRequestId(apiError.requestId ?? null);
+      announceSlippage('Slippage unavailable');
     } finally {
       if (requestId === activeRequestRef.current) {
         setLoading(false);
@@ -341,6 +373,9 @@ export default function QuoteClient() {
           )}
         </div>
       )}
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
+        {slippageAnnouncement}
+      </p>
     </main>
   );
 }
